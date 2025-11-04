@@ -1,0 +1,194 @@
+package application;
+
+import javafx.application.Application;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.layout.*;
+import javafx.scene.paint.Color;
+import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
+import javafx.stage.Stage;
+import java.util.regex.Pattern;
+
+public class ContactFormFX extends Application {
+
+    @Override
+    public void start(Stage primaryStage) {
+        primaryStage.setTitle("Contact Form - JavaFX");
+
+        // ====== Title ======
+        Label titleLabel = new Label("Contact Us");
+        titleLabel.setFont(Font.font("Arial", FontWeight.BOLD, 28));
+        titleLabel.setTextFill(Color.DARKBLUE);
+
+        // ====== Input Fields ======
+        Label nameLabel = new Label("Full Name:");
+        TextField nameField = new TextField();
+
+        Label emailLabel = new Label("Email:");
+        TextField emailField = new TextField();
+
+        Label phoneLabel = new Label("Phone:");
+        TextField phoneField = new TextField();
+
+        Label ageLabel = new Label("Age:");
+        TextField ageField = new TextField();
+
+        Label genderLabel = new Label("Gender:");
+        ChoiceBox<String> genderBox = new ChoiceBox<>();
+        genderBox.getItems().addAll("Male", "Female", "Other");
+
+        Label countryLabel = new Label("Country:");
+        ComboBox<String> countryBox = new ComboBox<>();
+        countryBox.getItems().addAll("India", "USA", "Uk");
+
+        Label subjectLabel = new Label("Subject:");
+        TextField subjectField = new TextField();
+
+        Label messageLabel = new Label("Message:");
+        TextArea messageArea = new TextArea();
+        messageArea.setPrefRowCount(4);
+
+        Label statusLabel = new Label();
+
+        // ====== Buttons ======
+        Button submitBtn = new Button("Submit");
+        Button resetBtn = new Button("Reset");
+
+        // ====== Layout ======
+        GridPane grid = new GridPane();
+        grid.setPadding(new Insets(20));
+        grid.setVgap(12);
+        grid.setHgap(10);
+        grid.setAlignment(Pos.CENTER);
+
+        int row = 0;
+        grid.add(nameLabel, 0, row);
+        grid.add(nameField, 1, row++);
+
+        grid.add(emailLabel, 0, row);
+        grid.add(emailField, 1, row++);
+
+        grid.add(phoneLabel, 0, row);
+        grid.add(phoneField, 1, row++);
+
+        grid.add(ageLabel, 0, row);
+        grid.add(ageField, 1, row++);
+
+        grid.add(genderLabel, 0, row);
+        grid.add(genderBox, 1, row++);
+
+        grid.add(countryLabel, 0, row);
+        grid.add(countryBox, 1, row++);
+
+        grid.add(subjectLabel, 0, row);
+        grid.add(subjectField, 1, row++);
+
+        grid.add(messageLabel, 0, row);
+        grid.add(messageArea, 1, row++);
+
+        HBox buttonBox = new HBox(15, submitBtn, resetBtn);
+        buttonBox.setAlignment(Pos.CENTER_RIGHT);
+        grid.add(buttonBox, 1, row++);
+
+        VBox root = new VBox(20, titleLabel, grid, statusLabel);
+        root.setPadding(new Insets(25));
+        root.setAlignment(Pos.TOP_CENTER);
+        root.setStyle("-fx-background-color: linear-gradient(to bottom right, #E3F2FD, #BBDEFB);");
+
+        // ====== Button Styles ======
+        styleButton(submitBtn, "#1976D2", "#1565C0");
+        styleButton(resetBtn, "#E53935", "#C62828");
+
+        // ====== Validation & Actions ======
+        submitBtn.setOnAction(e -> {
+            String name = nameField.getText().trim();
+            String email = emailField.getText().trim();
+            String phone = phoneField.getText().trim();
+            String age = ageField.getText().trim();
+            String gender = genderBox.getValue();
+            String country = countryBox.getValue();
+            String subject = subjectField.getText().trim();
+            String message = messageArea.getText().trim();
+
+            if (name.isEmpty() || email.isEmpty() || phone.isEmpty() ||
+                age.isEmpty() || gender == null || country == null ||
+                subject.isEmpty() || message.isEmpty()) {
+
+                statusLabel.setTextFill(Color.RED);
+                statusLabel.setText("Please fill all fields!");
+                return;
+            }
+
+            if (!isValidEmail(email)) {
+                statusLabel.setTextFill(Color.RED);
+                statusLabel.setText("Invalid email address!");
+                return;
+            }
+
+            if (!phone.matches("\\d{10}")) {
+                statusLabel.setTextFill(Color.RED);
+                statusLabel.setText("Phone number must be 10 digits!");
+                return;
+            }
+
+            if (!age.matches("\\d+") || Integer.parseInt(age) <= 0) {
+                statusLabel.setTextFill(Color.RED);
+                statusLabel.setText("Invalid age!");
+                return;
+            }
+
+            statusLabel.setTextFill(Color.GREEN);
+            statusLabel.setText("Form Submitted Successfully!");
+
+            System.out.println("---- Contact Form Details ----");
+            System.out.println("Name: " + name);
+            System.out.println("Email: " + email);
+            System.out.println("Phone: " + phone);
+            System.out.println("Age: " + age);
+            System.out.println("Gender: " + gender);
+            System.out.println("Country: " + country);
+            System.out.println("Subject: " + subject);
+            System.out.println("Message: " + message);
+            System.out.println("--------------------------------");
+        });
+
+        resetBtn.setOnAction(e -> {
+            nameField.clear();
+            emailField.clear();
+            phoneField.clear();
+            ageField.clear();
+            genderBox.setValue(null);
+            countryBox.setValue(null);
+            subjectField.clear();
+            messageArea.clear();
+            statusLabel.setTextFill(Color.GRAY);
+            statusLabel.setText("Form cleared!");
+        });
+
+        // ====== Scene Setup ======
+        Scene scene = new Scene(root, 500, 650);
+        primaryStage.setScene(scene);
+        primaryStage.show();
+    }
+
+    // ====== Button Styling Helper ======
+    private void styleButton(Button button, String baseColor, String hoverColor) {
+        button.setStyle("-fx-background-color: " + baseColor + "; -fx-text-fill: white; -fx-font-weight: bold;");
+        button.setPrefWidth(120);
+        button.setOnMouseEntered(e -> button.setStyle("-fx-background-color: " + hoverColor + "; -fx-text-fill: white; -fx-font-weight: bold;"));
+        button.setOnMouseExited(e -> button.setStyle("-fx-background-color: " + baseColor + "; -fx-text-fill: white; -fx-font-weight: bold;"));
+    }
+
+    // ====== Email Validation ======
+    private boolean isValidEmail(String email) {
+        String regex = "^[\\w.-]+@[\\w.-]+\\.[a-zA-Z]{2,}$";
+        return Pattern.matches(regex, email);
+    }
+
+    public static void main(String[] args) {
+        launch(args);
+    }
+}
