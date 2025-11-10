@@ -1,0 +1,408 @@
+package lab;
+
+import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
+import java.awt.*;
+import java.awt.event.*;
+import java.sql.*;
+import java.util.Vector;
+
+public class DigitalLibrarySwing extends JFrame {
+    // JDBC settings - change to your DB credentials
+    private static final String DB_URL = "jdbc:mysql://localhost:3306/digital_library?useSSL=false&serverTimezone=UTC";
+    private static final String DB_USER = "root";
+    private static final String DB_PASS = "red@yellow@green@2745";
+
+    // UI components
+    private JTextField tfName, tfId, tfEmail;
+    private JButton btnRegister, btnListMembers;
+    private JTextField tfSearch;
+    private JButton btnSearch, btnListDocs, btnBorrow;
+    private JTable table;
+    private DefaultTableModel tableModel;
+    private JTextField tfBorrowMemberId, tfBorrowTitle;
+
+    public DigitalLibrarySwing() {
+        setTitle("Digital Library");
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setSize(800, 600);
+        setLocationRelativeTo(null);
+        initComponents();
+        ensureSchemaExists();
+        loadAllDocumentsToTable(); // show docs on startup
+    }
+
+    private void initComponents() {
+        JPanel left = new JPanel();
+        left.setLayout(new BoxLayout(left, BoxLayout.Y_AXIS));
+        left.setBorder(BorderFactory.createEmptyBorder(10,10,10,10));
+        left.add(new JLabel("Register Member"));
+        left.add(Box.createVerticalStrut(6));
+
+        tfName = new JTextField();
+        tfId = new JTextField();
+        tfEmail = new JTextField();
+        btnRegister = new JButton("Register Member");
+        btnListMembers = new JButton("Display Members");
+
+        left.add(new JLabel("Name:")); left.add(tfName);
+        left.add(new JLabel("ID:")); left.add(tfId);
+        left.add(new JLabel("Email:")); left.add(tfEmail);
+        left.add(Box.createVerticalStrut(6));
+        left.add(btnRegister);
+        left.add(Box.createVerticalStrut(8));
+        left.add(btnListMembers);
+
+        left.add(Box.createVerticalStrut(20));
+        left.add(new JSeparator());
+        left.add(Box.createVerticalStrut(8));
+        left.add(new JLabel("Search / Borrow"));
+        tfSearch = new JTextField();
+        btnSearch = new JButton("Search Documents");
+        btnListDocs = new JButton("Display All Documents");
+        left.add(new JLabel("Keyword:")); left.add(tfSearch);
+        left.add(btnSearch);
+        left.add(Box.createVerticalStrut(6));
+        left.add(btnListDocs);
+
+        left.add(Box.createVerticalStrut(16));
+        left.add(new JLabel("Borrow Document"));
+        tfBorrowMemberId = new JTextField();
+        tfBorrowTitle = new JTextField();
+        btnBorrow = new JButton("Borrow");
+        left.add(new JLabel("Member ID:")); left.add(tfBorrowMemberId);
+        left.add(new JLabel("Document Title (or keyword):")); left.add(tfBorrowTitle);
+        left.add(Box.createVerticalStrut(6));
+        left.add(btnBorrow);
+
+        // Table
+        tableModel = new DefaultTableModel();
+        tableModel.setColumnIdentifiers(new String[]{"Doc ID","Title","Author","Content"});
+        table = new JTable(tableModel);
+        JScrollPane center = new JScrollPane(table);
+
+        getContentPane().setLayout(new BorderLayout());
+        getContentPane().add(left, BorderLayout.WEST);
+        getContentPane().add(center, BorderLayout.CENTER);
+
+        // Actions
+        btnRegister.addActionListener(e -> onRegisterMember());
+        btnListMembers.addActionListener(e -> loadMembersDialog());
+        btnSearch.addActionListener(e -> searchDocuments());
+        btnListDocs.addActionListener(e -> loadAllDocumentsToTable());
+        btnBorrow.addActionListener(e -> borrowDocument());
+
+        // double click table row to show details
+        table.addMouseListener(new MouseAdapter() {
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    int r = table.getSelectedRow();
+                    if (r >= 0) {
+                        String title = tableModel.getValueAt(r,1).toString();
+                        String author = tableModel.getValueAt(r,2).toString();
+                        String content = tableModel.getValueAt(r,3).toString();
+                        JTextArea ta = new JTextArea(content);
+                        ta.setLineWrap(true);
+                        ta.setWrapStyleWord(true);
+                        ta.setEditable(false);
+                        JScrollPane sp = new JScrollPane(ta);
+                        sp.setPreferredSize(new Dimension(500,300));
+                        JOptionPane.showMessageDialog(DigitalLibrarySwing.this,
+                                sp, title + " - " + author, JOptionPane.INFORMATION_MESSAGE);
+                    }
+                }
+            }
+        });
+    }
+
+    // Ensure DB schema exists (create tables if missing)
+    private void ensureSchemaExists() {
+        SwingWorker<Void,Void> worker = new SwingWorker<>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS)) {
+                    Statement st = conn.createStatement();
+                    // create tables (if not exist)
+                    st.executeUpdate(
+                        "CREATE TABLE IF NOT EXISTS members (" +
+                        "id VARCHAR(20) PRIMARY KEY," +
+                        "name VARCHAR(100) NOT NULL," +
+                        "email VARCHAR(150)," +
+                        "registered BOOLEAN DEFAULT TRUE" +
+                        ")"
+                    );
+                    st.executeUpdate(
+                        "CREATE TABLE IF NOT EXISTS documents (" +
+                        "id INT AUTO_INCREMENT PRIMARY KEY," +
+                        "title VARCHAR(200) NOT NULL," +
+                        "author VARCHAR(150)," +
+                        "content TEXT" +
+                        ")"
+                    );
+                    st.executeUpdate(
+                        "CREATE TABLE IF NOT EXISTS borrowed (" +
+                        "id INT AUTO_INCREMENT PRIMARY KEY," +
+                        "member_id VARCHAR(20)," +
+                        "document_id INT," +
+                        "borrowed_at DATETIME DEFAULT CURRENT_TIMESTAMP," +
+                        "FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE SET NULL ON UPDATE CASCADE," +
+                        "FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE SET NULL ON UPDATE CASCADE" +
+                        ")"
+                    );
+
+                    // Insert sample members/documents if tables empty
+                    ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM members");
+                    rs.next();
+                    if (rs.getInt(1) == 0) {
+                        PreparedStatement ps = conn.prepareStatement("INSERT INTO members (id, name, email, registered) VALUES (?,?,?,?)");
+                        ps.setString(1,"M001"); ps.setString(2,"Karthik"); ps.setString(3,"karthik@mail.com"); ps.setBoolean(4,true);
+                        ps.executeUpdate();
+                        ps.setString(1,"M002"); ps.setString(2,"Priya"); ps.setString(3,"priya@mail.com"); ps.setBoolean(4,true);
+                        ps.executeUpdate();
+                        ps.setString(1,"M003"); ps.setString(2,"Ravi"); ps.setString(3,"ravi@mail.com"); ps.setBoolean(4,true);
+                        ps.executeUpdate();
+                        ps.close();
+                    }
+                    rs = st.executeQuery("SELECT COUNT(*) FROM documents");
+                    rs.next();
+                    if (rs.getInt(1) == 0) {
+                        PreparedStatement pd = conn.prepareStatement("INSERT INTO documents (title, author, content) VALUES (?,?,?)");
+                        pd.setString(1,"AI Basics"); pd.setString(2,"John Doe"); pd.setString(3,"An introduction to Artificial Intelligence."); pd.executeUpdate();
+                        pd.setString(1,"Data Science"); pd.setString(2,"Mary Jane"); pd.setString(3,"Data analysis and visualization techniques."); pd.executeUpdate();
+                        pd.setString(1,"Machine Learning"); pd.setString(2,"Alan Turing"); pd.setString(3,"Supervised and unsupervised learning models."); pd.executeUpdate();
+                        pd.setString(1,"Neural Networks"); pd.setString(2,"Geoffrey Hinton"); pd.setString(3,"Deep learning and neural computation."); pd.executeUpdate();
+                        pd.setString(1,"Cloud Computing"); pd.setString(2,"Tim Berners"); pd.setString(3,"Internet-based computing and services."); pd.executeUpdate();
+                        pd.close();
+                    }
+                } catch (SQLException ex) {
+                    SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(DigitalLibrarySwing.this,
+                            "Database error: " + ex.getMessage(), "DB Error", JOptionPane.ERROR_MESSAGE));
+                }
+                return null;
+            }
+        };
+        worker.execute();
+    }
+
+    // Register member
+    private void onRegisterMember() {
+        String name = tfName.getText().trim();
+        String id = tfId.getText().trim();
+        String email = tfEmail.getText().trim();
+        if (name.isEmpty() || id.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Name and ID are required.");
+            return;
+        }
+
+        SwingWorker<Void,Void> worker = new SwingWorker<>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS)) {
+                    PreparedStatement psCheck = conn.prepareStatement("SELECT COUNT(*) FROM members WHERE id = ?");
+                    psCheck.setString(1, id);
+                    ResultSet rs = psCheck.executeQuery();
+                    rs.next();
+                    if (rs.getInt(1) > 0) {
+                        SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(DigitalLibrarySwing.this, "Member ID already exists."));
+                    } else {
+                        PreparedStatement ps = conn.prepareStatement("INSERT INTO members (id, name, email, registered) VALUES (?,?,?,?)");
+                        ps.setString(1, id);
+                        ps.setString(2, name);
+                        ps.setString(3, email);
+                        ps.setBoolean(4, true);
+                        ps.executeUpdate();
+                        SwingUtilities.invokeLater(() -> {
+                            JOptionPane.showMessageDialog(DigitalLibrarySwing.this, "Registration successful!");
+                            tfName.setText(""); tfId.setText(""); tfEmail.setText("");
+                        });
+                        ps.close();
+                    }
+                } catch (SQLException ex) {
+                    SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(DigitalLibrarySwing.this,
+                            "DB error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE));
+                }
+                return null;
+            }
+        };
+        worker.execute();
+    }
+
+    // Display members in a dialog
+    private void loadMembersDialog() {
+        SwingWorker<Vector<Vector<Object>>,Void> worker = new SwingWorker<>() {
+            @Override
+            protected Vector<Vector<Object>> doInBackground() throws Exception {
+                Vector<Vector<Object>> rows = new Vector<>();
+                try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS)) {
+                    Statement st = conn.createStatement();
+                    ResultSet rs = st.executeQuery("SELECT id, name, email, registered FROM members");
+                    while (rs.next()) {
+                        Vector<Object> row = new Vector<>();
+                        row.add(rs.getString("id"));
+                        row.add(rs.getString("name"));
+                        row.add(rs.getString("email"));
+                        row.add(rs.getBoolean("registered") ? "Yes" : "No");
+                        rows.add(row);
+                    }
+                } catch (SQLException ex) {
+                    SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(DigitalLibrarySwing.this,
+                            "DB error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE));
+                }
+                return rows;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    Vector<Vector<Object>> rows = get();
+                    Vector<String> cols = new Vector<>();
+                    cols.add("ID"); cols.add("Name"); cols.add("Email"); cols.add("Registered");
+                    JTable memberTable = new JTable(new DefaultTableModel(rows, cols));
+                    JScrollPane sp = new JScrollPane(memberTable);
+                    sp.setPreferredSize(new Dimension(600,300));
+                    JOptionPane.showMessageDialog(DigitalLibrarySwing.this, sp, "Registered Members", JOptionPane.INFORMATION_MESSAGE);
+                } catch (Exception ex) {
+                    // ignore
+                }
+            }
+        };
+        worker.execute();
+    }
+
+    // Search documents by keyword
+    private void searchDocuments() {
+        String key = tfSearch.getText().trim();
+        if (key.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Enter keyword to search.");
+            return;
+        }
+        SwingWorker<Void,Void> worker = new SwingWorker<>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                loadDocumentsIntoTable("%" + key + "%");
+                return null;
+            }
+        };
+        worker.execute();
+    }
+
+    // Load all docs
+    private void loadAllDocumentsToTable() {
+        SwingWorker<Void,Void> worker = new SwingWorker<>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                loadDocumentsIntoTable(null);
+                return null;
+            }
+        };
+        worker.execute();
+    }
+
+    // Helper: load documents into table (keyword pattern optional)
+    private void loadDocumentsIntoTable(String likePattern) {
+        SwingUtilities.invokeLater(() -> {
+            tableModel.setRowCount(0);
+        });
+        try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS)) {
+            PreparedStatement ps;
+            if (likePattern == null) {
+                ps = conn.prepareStatement("SELECT id, title, author, content FROM documents ORDER BY id");
+            } else {
+                ps = conn.prepareStatement("SELECT id, title, author, content FROM documents WHERE title LIKE ? OR author LIKE ? OR content LIKE ? ORDER BY id");
+                ps.setString(1, likePattern);
+                ps.setString(2, likePattern);
+                ps.setString(3, likePattern);
+            }
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                Object[] row = new Object[]{
+                        rs.getInt("id"),
+                        rs.getString("title"),
+                        rs.getString("author"),
+                        rs.getString("content")
+                };
+                SwingUtilities.invokeLater(() -> tableModel.addRow(row));
+            }
+            ps.close();
+        } catch (SQLException ex) {
+            SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(DigitalLibrarySwing.this,
+                    "DB error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE));
+        }
+    }
+
+    // Borrow document: find first matching doc by title/keyword and insert into borrowed
+    private void borrowDocument() {
+        String memberId = tfBorrowMemberId.getText().trim();
+        String titleKey = tfBorrowTitle.getText().trim();
+        if (memberId.isEmpty() || titleKey.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Member ID and document title/keyword are required.");
+            return;
+        }
+
+        SwingWorker<Void,Void> worker = new SwingWorker<>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS)) {
+                    // check member registered
+                    PreparedStatement pm = conn.prepareStatement("SELECT registered, name FROM members WHERE id = ?");
+                    pm.setString(1, memberId);
+                    ResultSet rsm = pm.executeQuery();
+                    if (!rsm.next()) {
+                        SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(DigitalLibrarySwing.this, "Member not found. Please register first."));
+                        return null;
+                    }
+                    boolean reg = rsm.getBoolean("registered");
+                    String memberName = rsm.getString("name");
+                    if (!reg) {
+                        SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(DigitalLibrarySwing.this, "Member not registered."));
+                        return null;
+                    }
+
+                    // find document
+                    PreparedStatement pd = conn.prepareStatement("SELECT id, title FROM documents WHERE title LIKE ? OR content LIKE ? OR author LIKE ? LIMIT 1");
+                    String pat = "%" + titleKey + "%";
+                    pd.setString(1, pat); pd.setString(2, pat); pd.setString(3, pat);
+                    ResultSet rsd = pd.executeQuery();
+                    if (!rsd.next()) {
+                        SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(DigitalLibrarySwing.this, "Book not found."));
+                        return null;
+                    }
+                    int docId = rsd.getInt("id");
+                    String docTitle = rsd.getString("title");
+
+                    // log borrow
+                    PreparedStatement pb = conn.prepareStatement("INSERT INTO borrowed (member_id, document_id) VALUES (?,?)");
+                    pb.setString(1, memberId);
+                    pb.setInt(2, docId);
+                    pb.executeUpdate();
+
+                    SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(DigitalLibrarySwing.this,
+                            "Book borrowed successfully: " + docTitle + "\nMember: " + memberName));
+                } catch (SQLException ex) {
+                    SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(DigitalLibrarySwing.this,
+                            "DB error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE));
+                }
+                return null;
+            }
+        };
+        worker.execute();
+    }
+
+    // main
+    public static void main(String[] args) {
+        // load MySQL JDBC
+        try {
+            Class.forName("com.mysql.cj.jdbc.Driver");
+        } catch (ClassNotFoundException e) {
+            JOptionPane.showMessageDialog(null, "MySQL JDBC Driver not found. Add connector jar to classpath.");
+            return;
+        }
+
+        SwingUtilities.invokeLater(() -> {
+            DigitalLibrarySwing app = new DigitalLibrarySwing();
+            app.setVisible(true);
+        });
+    }
+}
+
+
